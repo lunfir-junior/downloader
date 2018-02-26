@@ -1,74 +1,90 @@
 #include "Downloader.h"
 
+
 Downloader::Downloader(QObject *parent) : QObject(parent)
 {
-  m_manager = new QNetworkAccessManager(this);
-  m_notifier = new QSocketNotifier(fileno(stdin), QSocketNotifier::Read, this);
-  m_download = nullptr;
-
-  connect(m_notifier, &QSocketNotifier::activated, this, &Downloader::getUrl);
-
-  connect(this, &Downloader::signalCanStartDownload, this, &Downloader::startDownload);
-  connect(this, &Downloader::signalCanProcessDownload, this, &Downloader::processDownload);
+  m_currentDownload = nullptr;
 }
 
 Downloader::~Downloader()
 {
-  delete m_manager;
+
 }
 
-void Downloader::getUrl()
+void Downloader::append(const QStringList &urls)
 {
-  qDebug() << "in getUrl slot";
+  for (const QString &urlAsString : urls)
+    append(QUrl::fromEncoded(urlAsString.toLocal8Bit()));
 
-  std::string line;
-  QString tmp;
+  if ( m_downloadQueue.isEmpty() )
+    QTimer::singleShot(0, this, &Downloader::signalFinished);
+}
+
+void Downloader::append(const QUrl &url)
+{
+  if ( m_downloadQueue.isEmpty() )
+      QTimer::singleShot(0, this, &Downloader::startNextDownload);
+
+  m_downloadQueue.enqueue(url);
+}
+
+QString Downloader::getFileName(const QUrl &url)
+{
+  QString path = url.path();
+  QString filename = QFileInfo(path).fileName();
+
+  if ( QFile::exists(filename) )
+      qDebug() << "Alert. File overwriting.";
+
+  return filename;
+}
+
+void Downloader::startNextDownload()
+{
   QUrl url;
+  QString filename;
+  QNetworkRequest request;
 
-  std::getline(std::cin, line);
-  tmp = QString::fromStdString(line);
-  url = QUrl(tmp);
-  m_filename = tmp.split('/', QString::SkipEmptyParts, Qt::CaseSensitive).takeLast();
-  qDebug() << "m_filename: " << m_filename;
+  if ( m_downloadQueue.isEmpty() ) {
+    qDebug() << "download complete";
+    emit signalFinished();
 
-  emit signalCanStartDownload(url);
+    return;
+  }
+
+  url = m_downloadQueue.dequeue();
+  filename = getFileName(url);
+
+  m_file.setFileName(filename);
+
+  if ( !m_file.open(QIODevice::WriteOnly) ) {
+    qDebug() << "file save error: " << m_file.errorString();
+
+    return;
+  }
+
+  request = QNetworkRequest(url);
+  m_currentDownload = m_manager.get(request);
+
+  connect(m_currentDownload, &QNetworkReply::finished,  this, &Downloader::downloadFinished);
+  connect(m_currentDownload, &QNetworkReply::readyRead, this, &Downloader::downloadReadyRead);
 }
 
-void Downloader::startDownload(const QUrl &url)
+void Downloader::downloadFinished()
 {
-  qDebug() << "in startDownload slot";
-  qDebug() << url;
+  m_file.close();
 
-  QNetworkRequest request = QNetworkRequest(url);
+  if ( m_currentDownload->error() ) {
+    qDebug() << "download error";
+    m_file.remove();
+  }
 
-  m_download = m_manager->get(request);
-
-  emit signalCanProcessDownload(/*m_download*/);
+  startNextDownload();
 }
 
-void Downloader::processDownload(/*QNetworkReply *reply*/)
+void Downloader::downloadReadyRead()
 {
-  qDebug() << "in processDownload slot";
-  QUrl url = m_download->url();
-  qDebug() << url;
-
-  QFile m_file(m_filename);
-
-    if (!m_file.open(QIODevice::WriteOnly)) {
-        fprintf(stderr, "Could not open %s for writing: %s\n",
-                qPrintable(m_filename),
-                qPrintable(m_file.errorString()));
-//        return false;
-    }
-
-    m_file.write(m_download->readAll());
-    m_file.close();
-
-//    return true;
-
+    m_file.write(m_currentDownload->readAll());
 }
 
-void Downloader::finishDownload()
-{
 
-}

@@ -2,12 +2,9 @@
 #define DOWNLOADER_H
 
 #include <QObject>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
-#include <QSocketNotifier>
-#include <QFile>
-#include <QString>
-#include <iostream>
+#include <QtCore>
+#include <QtNetwork>
+#include <QTextStream>
 
 class Downloader : public QObject
 {
@@ -16,24 +13,24 @@ public:
   explicit Downloader(QObject *parent = nullptr);
   ~Downloader();
 
-private:
-  QNetworkAccessManager *m_manager;
-  QNetworkReply *m_download;
-  QSocketNotifier *m_notifier;
-//  QFile m_file;
-  QString m_filename;
+//  void append(const QStringList &urls);
+  void append(const QUrl &url);
+  void append(const QStringList &urls);
+  static QString getFileName(const QUrl &url);
 
-//  bool saveFile();
+private:
+  QNetworkAccessManager m_manager;
+  QQueue<QUrl> m_downloadQueue;
+  QNetworkReply *m_currentDownload;
+  QFile m_file;
 
 signals:
-  void signalCanStartDownload(const QUrl &url);
-  void signalCanProcessDownload(/*QNetworkReply *reply*/);
+  void signalFinished();
 
 public slots:
-  void getUrl();
-  void startDownload(const QUrl &url);
-  void processDownload();
-  void finishDownload();
+  void startNextDownload();
+  void downloadFinished();
+  void downloadReadyRead();
 };
 
 #endif // DOWNLOADER_H
